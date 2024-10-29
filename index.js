@@ -42,9 +42,9 @@ const sendConfirmationEmail = (email, token) => {
     subject: 'SobatKendara - Confirm your registration',
     text: `Click the link to confirm your registration: ${confirmationUrl}`,
     
-  }
+  };
   //html: '<strong>and easy to do anywhere, even with Node.js</strong>',
-  return sgMail.send(msg)
+  return sgMail.send(msg);
 };
 
 const generateToken = (user) => {
@@ -108,11 +108,17 @@ app.post('/login', (req, res) => {
 
   // Find user by email
   db.query('SELECT * FROM users WHERE email = ?', [email], async (err, results) => {
+    if (err) throw err;
     if (results.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
 
     const user = results[0];
+
+    // Check if the user is active
+    if (!user.is_active) {
+      return res.status(403).json({ message: 'Please confirm your email to activate your account' });
+    }
 
     // Compare passwords
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
