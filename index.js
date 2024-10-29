@@ -24,9 +24,7 @@ db.connect((err) => {
 });
 
 const generateToken = (user) => {
-  return jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, {
-    expiresIn: '1h',
-  });
+  return jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET);
 };
 
 app.post('/signup', async (req, res) => {
@@ -67,20 +65,60 @@ app.post('/login', (req, res) => {
 
     // Generate a JWT token
     const token = generateToken(user);
-    res.json({ token });
+    db.query('INSERT INTO tokens (token, user_id) VALUES (?, ?)', [token, user.id], (err) => {
+      if (err) throw err;
+      res.json({ token });
+    });
   });
 });
+
+app.post('/logout', (req, res) => {
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) return res.status(400).json({ message: 'No token provided' });
+
+  // Verify the token to ensure it's valid
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(403).json({ message: 'Invalid token' });
+    }
+
+    // Check if the token exists in the database
+    db.query('SELECT * FROM tokens WHERE token = ? AND is_valid = TRUE', [token], (err, results) => {
+      if (err) throw err;
+      if (results.length === 0) {
+        return res.status(404).json({ message: 'Token not found or already invalid' });
+      }
+
+      // Mark the token as invalid in the database
+      db.query('UPDATE tokens SET is_valid = FALSE WHERE token = ?', [token], (err) => {
+        if (err) throw err;
+        res.json({ message: 'Logged out successfully' });
+      });
+    });
+  });
+});
+
 
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'Access token required' });
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: 'Invalid token' });
-    req.user = user;
-    next();
+  // Check if the token exists and is valid in the database
+  db.query('SELECT * FROM tokens WHERE token = ? AND is_valid = TRUE', [token], (err, results) => {
+    if (err) throw err;
+    if (results.length === 0) {
+      return res.status(403).json({ message: 'Invalid or expired token' });
+    }
+
+    // Verify the token using jwt
+    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+      if (err) return res.status(403).json({ message: 'Invalid token' });
+      req.user = user;
+      next();
+    });
   });
 };
+
 
 app.get('/profile', authenticateToken, (req, res) => {
   res.json({ message: 'Welcome to your profile', user: req.user });
