@@ -4,6 +4,7 @@ const mysql = require('mysql2');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const sgMail = require('@sendgrid/mail')
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -38,7 +39,7 @@ const sendConfirmationEmail = (email, token) => {
 
   const msg = {
     to: email, // Change to your recipient
-    from: 'fahrismumtazaahsan@mail.ugm.ac.id', // Change to your verified sender
+    from: process.env.SENDGRID_FROM_EMAIL, // Change to your verified sender
     subject: 'SobatKendara - Confirm your registration',
     text: `Click the link to confirm your registration: ${confirmationUrl}`,
     
@@ -100,6 +101,88 @@ app.get('/confirm/:token', (req, res) => {
       }
       res.json({ message: 'Account successfully activated' });
     });
+  });
+});
+
+// Generate a 6-digit OTP
+const generateOTP = () => {
+  return crypto.randomInt(100000, 999999).toString();
+};
+
+// Send OTP via email
+const sendOTPEmail = (email, otp) => {
+  const msg = {
+    to: email,
+    from: process.env.SENDGRID_FROM_EMAIL,
+    subject: 'SobatKendara - Your OTP for Password Reset',
+    text: `Use this OTP to reset your password: ${otp}`,
+  };
+  return sgMail.send(msg);
+};
+
+// Request OTP endpoint
+app.post('/request-otp', (req, res) => {
+  const { email } = req.body;
+
+  // Find user by email
+  db.query('SELECT * FROM users WHERE email = ?', [email], async (err, results) => {
+    if (err) throw err;
+    if (results.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const otp = generateOTP();
+    const expiration = new Date(Date.now() + 10 * 60000); // OTP valid for 10 minutes
+
+    // Store OTP and expiration in the database
+    db.query(
+      'UPDATE users SET otp = ?, otp_expiration = ? WHERE email = ?',
+      [otp, expiration, email],
+      async (err) => {
+        if (err) throw err;
+
+        // Send OTP via email
+        try {
+          await sendOTPEmail(email, otp);
+          res.json({ message: 'OTP sent to your email' });
+        } catch (error) {
+          console.error('Error sending OTP:', error);
+          res.status(500).json({ message: 'Failed to send OTP' });
+        }
+      }
+    );
+  });
+});
+
+app.post('/reset-password', async (req, res) => {
+  const { email, otp, new_password } = req.body;
+
+  // Find user by email and verify OTP
+  db.query('SELECT * FROM users WHERE email = ? AND otp = ?', [email, otp], async (err, results) => {
+    if (err) throw err;
+    if (results.length === 0) {
+      return res.status(400).json({ message: 'Invalid OTP or email' });
+    }
+
+    const user = results[0];
+
+    // Check if OTP has expired
+    if (new Date() > new Date(user.otp_expiration)) {
+      return res.status(400).json({ message: 'OTP has expired' });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(new_password, 10);
+
+    // Update the user's password and clear the OTP
+    db.query(
+      'UPDATE users SET password_hash = ?, otp = NULL, otp_expiration = NULL WHERE email = ?',
+      [hashedPassword, email],
+      (err) => {
+        if (err) throw err;
+        res.json({ message: 'Password reset successfully' });
+      }
+    );
   });
 });
 
