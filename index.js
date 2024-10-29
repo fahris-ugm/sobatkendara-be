@@ -3,10 +3,12 @@ const bodyParser = require('body-parser');
 const mysql = require('mysql2');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const sgMail = require('@sendgrid/mail')
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const HOST = process.env.APP_HOST;
+const PORT = process.env.APP_PORT || 8080;
 
 app.use(express.json()); 
 
@@ -23,12 +25,34 @@ db.connect((err) => {
   console.log('Connected to MySQL database');
 });
 
+sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+
+// Generate a confirmation token
+const generateConfirmationToken = () => {
+  return jwt.sign({}, process.env.JWT_SECRET, { expiresIn: '1d' }); // Token valid for 1 day
+};
+
+// Send confirmation email
+const sendConfirmationEmail = (email, token) => {
+  const confirmationUrl = `http://${HOST}:${PORT}/confirm/${token}`;
+
+  const msg = {
+    to: email, // Change to your recipient
+    from: 'fahrismumtazaahsan@mail.ugm.ac.id', // Change to your verified sender
+    subject: 'SobatKendara - Confirm your registration',
+    text: `Click the link to confirm your registration: ${confirmationUrl}`,
+    
+  }
+  //html: '<strong>and easy to do anywhere, even with Node.js</strong>',
+  return sgMail.send(msg)
+};
+
 const generateToken = (user) => {
   return jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET);
 };
 
 app.post('/signup', async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, notif_email } = req.body;
 
   // Check if the user already exists
   db.query('SELECT * FROM users WHERE email = ?', [email], async (err, results) => {
@@ -38,10 +62,43 @@ app.post('/signup', async (req, res) => {
 
     // Hash the password and save the user
     const hashedPassword = await bcrypt.hash(password, 10);
-    db.query('INSERT INTO users (email, password_hash) VALUES (?, ?)', 
-      [email, hashedPassword], (err, result) => {
+    const confirmationToken = generateConfirmationToken();
+
+    db.query('INSERT INTO users (email, password_hash, additional_email, is_active, confirmation_token) VALUES (?, ?, ?, ?, ?)', 
+      [email, hashedPassword, notif_email, 0, confirmationToken], async (err, result) => {
         if (err) throw err;
-        res.status(201).json({ message: 'User created successfully' });
+        // Send confirmation email
+        try {
+          await sendConfirmationEmail(email, confirmationToken);
+          res.status(201).json({ message: 'Signup successful, please confirm your email' });
+        } catch (error) {
+          res.status(500).json({ message: 'Failed to send confirmation email' });
+        }
+    });
+  });
+});
+
+app.get('/test', (req, res) => {
+  const tk = "testaja"
+  const confirmationUrl = `http://localhost:${PORT}/confirm/${tk}`;
+  console.log(confirmationUrl);
+  console.log(`Click the link to confirm your registration: ${confirmationUrl}`);
+});
+
+// Confirm registration route
+app.get('/confirm/:token', (req, res) => {
+  const { token } = req.params;
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) return res.status(400).json({ message: 'Invalid or expired token' });
+
+    // Activate the user
+    db.query('UPDATE users SET is_active = 1, confirmation_token = NULL WHERE confirmation_token = ?', [token], (err, result) => {
+      if (err) throw err;
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'User not found or already activated' });
+      }
+      res.json({ message: 'Account successfully activated' });
     });
   });
 });
