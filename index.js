@@ -293,6 +293,57 @@ app.get('/profile', authenticateToken, (req, res) => {
   );
 });
 
+// Edit profile endpoint to update additional email
+app.put('/edit-profile', authenticateToken, (req, res) => {
+  const userId = req.user.id; // Extract user ID from JWT token
+  let { additional_email } = req.body; // Get additional email from request body
+
+  // Handle empty string case by setting it to null
+  if (additional_email !== undefined && additional_email.trim() === '') {
+    additional_email = null;
+  }
+
+  // Construct the SQL query based on the presence of additional_email
+  const sql = additional_email !== undefined
+    ? 'UPDATE users SET additional_email = ? WHERE id = ?'
+    : 'SELECT id FROM users WHERE id = ?'; // Dummy select if nothing to update
+
+  const params = additional_email !== undefined
+    ? [additional_email, userId]
+    : [userId];
+
+
+  // Update the additional_email field (can be null)
+  db.query(sql, params, (err, result) => {
+    if (err) throw err;
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Fetch the updated user details
+    db.query(
+      'SELECT id, email, additional_email, created_at FROM users WHERE id = ?',
+      [userId],
+      (err, results) => {
+        if (err) throw err;
+
+        const user = results[0];
+        res.json({
+          message: 'Profile updated successfully',
+          user: {
+            id: user.id,
+            email: user.email,
+            additional_email: user.additional_email,
+            created_at: user.created_at,
+          },
+        });
+      }
+    );
+  });
+});
+
+
 
 app.post('/change-password', authenticateToken, async (req, res) => {
   const { old_password, new_password } = req.body;
