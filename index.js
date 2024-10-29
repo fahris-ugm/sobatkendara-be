@@ -244,7 +244,6 @@ app.post('/logout', (req, res) => {
   });
 });
 
-
 const authenticateToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'Access token required' });
@@ -268,6 +267,37 @@ const authenticateToken = (req, res, next) => {
 
 app.get('/profile', authenticateToken, (req, res) => {
   res.json({ message: 'Welcome to your profile', user: req.user });
+});
+
+app.post('/change-password', authenticateToken, async (req, res) => {
+  const { old_password, new_password } = req.body;
+  const userId = req.user.id; // Extracted from the JWT token
+
+  // Fetch the user's current password hash from the database
+  db.query('SELECT password_hash FROM users WHERE id = ?', [userId], async (err, results) => {
+    if (err) throw err;
+
+    if (results.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const user = results[0];
+
+    // Compare the current password with the stored hash
+    const isPasswordValid = await bcrypt.compare(old_password, user.password_hash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: 'Current password is incorrect' });
+    }
+
+    // Hash the new password
+    const hashedNewPassword = await bcrypt.hash(new_password, 10);
+
+    // Update the user's password in the database
+    db.query('UPDATE users SET password_hash = ? WHERE id = ?', [hashedNewPassword, userId], (err) => {
+      if (err) throw err;
+      res.json({ message: 'Password changed successfully' });
+    });
+  });
 });
 
 // Start the server
