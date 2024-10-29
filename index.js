@@ -265,9 +265,34 @@ const authenticateToken = (req, res, next) => {
 };
 
 
+// Profile endpoint to fetch user details
 app.get('/profile', authenticateToken, (req, res) => {
-  res.json({ message: 'Welcome to your profile', user: req.user });
+  const userId = req.user.id; // Extract user ID from JWT token
+
+  // Query to fetch user details
+  db.query(
+    'SELECT id, email, additional_email, created_at FROM users WHERE id = ?',
+    [userId],
+    (err, results) => {
+      if (err) throw err;
+
+      if (results.length === 0) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      const user = results[0]; // Get the user details
+
+      // Send the user properties as response
+      res.json({
+        id: user.id,
+        email: user.email,
+        additional_email: user.additional_email,
+        created_at: user.created_at,
+      });
+    }
+  );
 });
+
 
 app.post('/change-password', authenticateToken, async (req, res) => {
   const { old_password, new_password } = req.body;
