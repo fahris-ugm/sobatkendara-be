@@ -11,15 +11,26 @@ const app = express();
 const HOST = process.env.APP_HOST;
 const PORT = process.env.APP_PORT || 8080;
 
-app.use(express.json()); 
+app.use(express.json());
 
-const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
-});
+const isDevelopment = process.env.ENVIRONMENT === 'development';
+let db = null;
+if (isDevelopment) {
+  db = mysql.createConnection({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: process.env.DB_PORT,
+  });
+} else {
+  db = mysql.createConnection({
+    socketPath: process.env.INSTANCE_UNIX_SOCKET,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+  });
+}
 
 db.connect((err) => {
   if (err) throw err;
@@ -35,7 +46,12 @@ const generateConfirmationToken = () => {
 
 // Send confirmation email
 const sendConfirmationEmail = (email, token) => {
-  const confirmationUrl = `http://${HOST}:${PORT}/confirm/${token}`;
+  
+
+  // Build the confirmation URL
+  const confirmationUrl = isDevelopment
+    ? `${HOST}:${PORT}/confirm/${token}`
+    : `${HOST}/confirm/${token}`;
 
   const msg = {
     to: email, // Change to your recipient
